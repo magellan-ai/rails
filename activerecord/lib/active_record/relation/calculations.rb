@@ -2,50 +2,12 @@
 
 require "active_support/core_ext/enumerable"
 
+require "activerecord/lib/active_record/relation/calculations/calculator"
+require "activerecord/lib/active_record/relation/calculations/column_alias_tracker"
+
 module ActiveRecord
   # = Active Record \Calculations
   module Calculations
-    class ColumnAliasTracker # :nodoc:
-      def initialize(connection)
-        @connection = connection
-        @aliases = Hash.new(0)
-      end
-
-      def alias_for(field)
-        aliased_name = column_alias_for(field)
-
-        if @aliases[aliased_name] == 0
-          @aliases[aliased_name] = 1
-          aliased_name
-        else
-          # Update the count
-          count = @aliases[aliased_name] += 1
-          "#{truncate(aliased_name)}_#{count}"
-        end
-      end
-
-      private
-        # Converts the given field to the value that the database adapter returns as
-        # a usable column name:
-        #
-        #   column_alias_for("users.id")                 # => "users_id"
-        #   column_alias_for("sum(id)")                  # => "sum_id"
-        #   column_alias_for("count(distinct users.id)") # => "count_distinct_users_id"
-        #   column_alias_for("count(*)")                 # => "count_all"
-        def column_alias_for(field)
-          column_alias = +field
-          column_alias.gsub!(/\*/, "all")
-          column_alias.gsub!(/\W+/, " ")
-          column_alias.strip!
-          column_alias.gsub!(/ +/, "_")
-          @connection.table_alias_for(column_alias)
-        end
-
-        def truncate(name)
-          name.slice(0, @connection.table_alias_length - 2)
-        end
-    end
-
     # Count the records.
     #
     #   Person.count
@@ -189,35 +151,7 @@ module ActiveRecord
     #        ...
     #      end
     def calculate(operation, column_name)
-      operation = operation.to_s.downcase
-
-      if @none
-        case operation
-        when "count", "sum"
-          result = group_values.any? ? Hash.new : 0
-          return @async ? Promise::Complete.new(result) : result
-        when "average", "minimum", "maximum"
-          result = group_values.any? ? Hash.new : nil
-          return @async ? Promise::Complete.new(result) : result
-        end
-      end
-
-      if has_include?(column_name)
-        relation = apply_join_dependency
-
-        if operation == "count"
-          unless distinct_value || distinct_select?(column_name || select_for_count)
-            relation.distinct!
-            relation.select_values = [ klass.primary_key || table[Arel.star] ]
-          end
-          # PostgreSQL: ORDER BY expressions must appear in SELECT list when using DISTINCT
-          relation.order_values = [] if group_values.empty?
-        end
-
-        relation.calculate(operation, column_name)
-      else
-        perform_calculation(operation, column_name)
-      end
+      Calculator.new(self, operation, column_name, none: @none, async: @async).perform
     end
 
     # Use #pluck as a shortcut to select one or more attributes without
@@ -372,37 +306,6 @@ module ActiveRecord
         eager_loading? || (includes_values.present? && column_name && column_name != :all)
       end
 
-      def perform_calculation(operation, column_name)
-        operation = operation.to_s.downcase
-
-        # If #count is used with #distinct (i.e. `relation.distinct.count`) it is
-        # considered distinct.
-        distinct = distinct_value
-
-        if operation == "count"
-          column_name ||= select_for_count
-          if column_name == :all
-            if !distinct
-              distinct = distinct_select?(select_for_count) if group_values.empty?
-            elsif group_values.any? || select_values.empty? && order_values.empty?
-              column_name = primary_key
-            end
-          elsif distinct_select?(column_name)
-            distinct = nil
-          end
-        end
-
-        if group_values.any?
-          execute_grouped_calculation(operation, column_name, distinct)
-        else
-          execute_simple_calculation(operation, column_name, distinct)
-        end
-      end
-
-      def distinct_select?(column_name)
-        column_name.is_a?(::String) && /\bDISTINCT[\s(]/i.match?(column_name)
-      end
-
       def aggregate_column(column_name)
         return column_name if Arel::Expressions === column_name
 
@@ -413,122 +316,6 @@ module ActiveRecord
 
       def operation_over_aggregate_column(column, operation, distinct)
         operation == "count" ? column.count(distinct) : column.public_send(operation)
-      end
-
-      def execute_simple_calculation(operation, column_name, distinct) # :nodoc:
-        if operation == "count" && (column_name == :all && distinct || has_limit_or_offset?)
-          # Shortcut when limit is zero.
-          return 0 if limit_value == 0
-
-          relation = self
-          query_builder = build_count_subquery(spawn, column_name, distinct)
-        else
-          # PostgreSQL doesn't like ORDER BY when there are no GROUP BY
-          relation = unscope(:order).distinct!(false)
-
-          column = aggregate_column(column_name)
-          select_value = operation_over_aggregate_column(column, operation, distinct)
-          select_value.distinct = true if operation == "sum" && distinct
-
-          relation.select_values = [select_value]
-
-          query_builder = relation.arel
-        end
-
-        query_result = if relation.where_clause.contradiction?
-          ActiveRecord::Result.empty
-        else
-          skip_query_cache_if_necessary do
-            @klass.connection.select_all(query_builder, "#{@klass.name} #{operation.capitalize}", async: @async)
-          end
-        end
-
-        query_result.then do |result|
-          if operation != "count"
-            type = column.try(:type_caster) ||
-              lookup_cast_type_from_join_dependencies(column_name.to_s) || Type.default_value
-            type = type.subtype if Enum::EnumType === type
-          end
-
-          type_cast_calculated_value(result.cast_values.first, operation, type)
-        end
-      end
-
-      def execute_grouped_calculation(operation, column_name, distinct) # :nodoc:
-        group_fields = group_values
-        group_fields = group_fields.uniq if group_fields.size > 1
-
-        if group_fields.size == 1 && group_fields.first.respond_to?(:to_sym)
-          association  = klass._reflect_on_association(group_fields.first)
-          associated   = association && association.belongs_to? # only count belongs_to associations
-          group_fields = Array(association.foreign_key) if associated
-        end
-        group_fields = arel_columns(group_fields)
-
-        column_alias_tracker = ColumnAliasTracker.new(connection)
-
-        group_aliases = group_fields.map { |field|
-          field = connection.visitor.compile(field) if Arel.arel_node?(field)
-          column_alias_tracker.alias_for(field.to_s.downcase)
-        }
-        group_columns = group_aliases.zip(group_fields)
-
-        column = aggregate_column(column_name)
-        column_alias = column_alias_tracker.alias_for("#{operation} #{column_name.to_s.downcase}")
-        select_value = operation_over_aggregate_column(column, operation, distinct)
-        select_value.as(connection.quote_column_name(column_alias))
-
-        select_values = [select_value]
-        select_values += self.select_values unless having_clause.empty?
-
-        select_values.concat group_columns.map { |aliaz, field|
-          aliaz = connection.quote_column_name(aliaz)
-          if field.respond_to?(:as)
-            field.as(aliaz)
-          else
-            "#{field} AS #{aliaz}"
-          end
-        }
-
-        relation = except(:group).distinct!(false)
-        relation.group_values  = group_fields
-        relation.select_values = select_values
-
-        result = skip_query_cache_if_necessary { @klass.connection.select_all(relation.arel, "#{@klass.name} #{operation.capitalize}", async: @async) }
-        result.then do |calculated_data|
-          if association
-            key_ids     = calculated_data.collect { |row| row[group_aliases.first] }
-            key_records = association.klass.base_class.where(association.klass.base_class.primary_key => key_ids)
-            key_records = key_records.index_by(&:id)
-          end
-
-          key_types = group_columns.each_with_object({}) do |(aliaz, col_name), types|
-            types[aliaz] = col_name.try(:type_caster) ||
-              type_for(col_name) do
-                calculated_data.column_types.fetch(aliaz, Type.default_value)
-              end
-          end
-
-          hash_rows = calculated_data.cast_values(key_types).map! do |row|
-            calculated_data.columns.each_with_object({}).with_index do |(col_name, hash), i|
-              hash[col_name] = row[i]
-            end
-          end
-
-          if operation != "count"
-            type = column.try(:type_caster) ||
-              lookup_cast_type_from_join_dependencies(column_name.to_s) || Type.default_value
-            type = type.subtype if Enum::EnumType === type
-          end
-
-          hash_rows.each_with_object({}) do |row, result|
-            key = group_aliases.map { |aliaz| row[aliaz] }
-            key = key.first if key.size == 1
-            key = key_records[key] if associated
-
-            result[key] = type_cast_calculated_value(row[column_alias], operation, type)
-          end
-        end
       end
 
       def type_for(field, &block)
@@ -576,15 +363,6 @@ module ActiveRecord
           end
         else # "minimum", "maximum"
           type.deserialize(value)
-        end
-      end
-
-      def select_for_count
-        if select_values.present?
-          return select_values.first if select_values.one?
-          select_values.join(", ")
-        else
-          :all
         end
       end
 
