@@ -2,8 +2,8 @@
 
 require "active_support/core_ext/enumerable"
 
-require "activerecord/lib/active_record/relation/calculations/calculator"
-require "activerecord/lib/active_record/relation/calculations/column_alias_tracker"
+require_relative "calculations/calculator"
+require_relative "calculations/column_alias_tracker"
 
 module ActiveRecord
   # = Active Record \Calculations
@@ -151,7 +151,7 @@ module ActiveRecord
     #        ...
     #      end
     def calculate(operation, column_name)
-      Calculator.new(self, operation, column_name, none: @none, async: @async).perform
+      Calculator.new(self, operation, column_name, none: @none, async: @async, klass: @klass).perform
     end
 
     # Use #pluck as a shortcut to select one or more attributes without
@@ -306,18 +306,6 @@ module ActiveRecord
         eager_loading? || (includes_values.present? && column_name && column_name != :all)
       end
 
-      def aggregate_column(column_name)
-        return column_name if Arel::Expressions === column_name
-
-        arel_column(column_name.to_s) do |name|
-          Arel.sql(column_name == :all ? "*" : name)
-        end
-      end
-
-      def operation_over_aggregate_column(column, operation, distinct)
-        operation == "count" ? column.count(distinct) : column.public_send(operation)
-      end
-
       def type_for(field, &block)
         field_name = field.respond_to?(:name) ? field.name.to_s : field.to_s.split(".").last
         @klass.type_for_attribute(field_name, &block)
@@ -346,39 +334,6 @@ module ActiveRecord
           end
         end
         result.cast_values(cast_types)
-      end
-
-      def type_cast_calculated_value(value, operation, type)
-        case operation
-        when "count"
-          value.to_i
-        when "sum"
-          type.deserialize(value || 0)
-        when "average"
-          case type.type
-          when :integer, :decimal
-            value&.to_d
-          else
-            type.deserialize(value)
-          end
-        else # "minimum", "maximum"
-          type.deserialize(value)
-        end
-      end
-
-      def build_count_subquery(relation, column_name, distinct)
-        if column_name == :all
-          column_alias = Arel.star
-          relation.select_values = [ Arel.sql(FinderMethods::ONE_AS_ONE) ] unless distinct
-        else
-          column_alias = Arel.sql("count_column")
-          relation.select_values = [ aggregate_column(column_name).as(column_alias) ]
-        end
-
-        subquery_alias = Arel.sql("subquery_for_count")
-        select_value = operation_over_aggregate_column(column_alias, "count", false)
-
-        relation.build_subquery(subquery_alias, select_value)
       end
   end
 end

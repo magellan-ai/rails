@@ -3,7 +3,9 @@
 module ActiveRecord
   module Calculations
     class RelationManager # :nodoc:
-      delegate :has_limit_or_offset?, :primary_key, to: :@relation
+      attr_reader :relation
+
+      delegate :has_limit_or_offset?, :primary_key, :group_values, to: :@relation
 
       def initialize(relation)
         @relation = relation
@@ -12,6 +14,7 @@ module ActiveRecord
       def grouped?
         @relation.group_values.any?
       end
+
 
       def has_include?(column_name)
         @relation.eager_loading? || (@relation.includes_values.present? && column_name && column_name != :all)

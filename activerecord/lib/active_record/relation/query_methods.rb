@@ -9,6 +9,24 @@ module ActiveRecord
   module QueryMethods
     include ActiveModel::ForbiddenAttributesProtection
 
+    def arel_columns(columns)
+      columns.flat_map do |field|
+        case field
+        when Symbol
+          arel_column(field.to_s) do |attr_name|
+            connection.quote_table_name(attr_name)
+          end
+        when String
+          arel_column(field, &:itself)
+        when Proc
+          field.call
+        else
+          field
+        end
+      end
+    end
+
+
     # +WhereChain+ objects act as placeholder for queries in which +where+ does not have any parameter.
     # In this case, +where+ can be chained to return a new relation.
     class WhereChain
@@ -117,7 +135,6 @@ module ActiveRecord
 
         @scope
       end
-
       private
         def scope_association_reflection(association)
           reflection = @scope.klass._reflect_on_association(association)
@@ -1766,22 +1783,6 @@ module ActiveRecord
         ).join_sources.first
       end
 
-      def arel_columns(columns)
-        columns.flat_map do |field|
-          case field
-          when Symbol
-            arel_column(field.to_s) do |attr_name|
-              connection.quote_table_name(attr_name)
-            end
-          when String
-            arel_column(field, &:itself)
-          when Proc
-            field.call
-          else
-            field
-          end
-        end
-      end
 
       def arel_column(field)
         field = klass.attribute_aliases[field] || field

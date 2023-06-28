@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "abstract_calculation"
+
 module ActiveRecord
   module Calculations
     class GroupedCalculation < AbstractCalculation # :nodoc:
@@ -10,34 +12,34 @@ module ActiveRecord
         end
 
         def perform_calculation # :nodoc:
-          group_fields = group_values
+          group_fields = relation.group_values
           group_fields = group_fields.uniq if group_fields.size > 1
 
           if group_fields.size == 1 && group_fields.first.respond_to?(:to_sym)
-            association  = klass._reflect_on_association(group_fields.first)
+            association  = relation.klass._reflect_on_association(group_fields.first)
             associated   = association && association.belongs_to? # only count belongs_to associations
             group_fields = Array(association.foreign_key) if associated
           end
-          group_fields = arel_columns(group_fields)
+          group_fields = relation.arel_columns(group_fields)
 
-          column_alias_tracker = ColumnAliasTracker.new(connection)
+          column_alias_tracker = ColumnAliasTracker.new(relation.connection)
 
           group_aliases = group_fields.map { |field|
-            field = connection.visitor.compile(field) if Arel.arel_node?(field)
+            field = relation.connection.visitor.compile(field) if Arel.arel_node?(field)
             column_alias_tracker.alias_for(field.to_s.downcase)
           }
           group_columns = group_aliases.zip(group_fields)
 
           column = aggregate_column(column_name)
           column_alias = column_alias_tracker.alias_for("#{operation} #{column_name.to_s.downcase}")
-          select_value = operation_over_aggregate_column(column, operation, distinct)
-          select_value.as(connection.quote_column_name(column_alias))
+          select_value = operation_over_aggregate_column(column, operation, relation.distinct)
+          select_value.as(relation.connection.quote_column_name(column_alias))
 
           select_values = [select_value]
-          select_values += self.select_values unless having_clause.empty?
+          select_values += self.select_values unless relation.having_clause.empty?
 
           select_values.concat group_columns.map { |aliaz, field|
-            aliaz = connection.quote_column_name(aliaz)
+            aliaz = relation.connection.quote_column_name(aliaz)
             if field.respond_to?(:as)
               field.as(aliaz)
             else
@@ -45,11 +47,13 @@ module ActiveRecord
             end
           }
 
-          relation = except(:group).distinct!(false)
-          relation.group_values  = group_fields
-          relation.select_values = select_values
+          curr_relation = relation.except(:group).distinct!(false)
+          curr_relation.group_values  = group_fields
+          curr_relation.select_values = select_values
 
-          result = skip_query_cache_if_necessary { @klass.connection.select_all(relation.arel, "#{@klass.name} #{operation.capitalize}", async: @async) }
+          result = curr_relation.send(:skip_query_cache_if_necessary) { @klass.connection.select_all(curr_relation.arel, "#{@klass.name} #{operation.capitalize}", async: @async) }
+          # result = curr_relation.skip_query_cache_if_necessary { @klass.connection.select_all(curr_relation.arel, "#{@klass.name} #{operation.capitalize}", async: @async) }
+          #
           result.then do |calculated_data|
             if association
               key_ids     = calculated_data.collect { |row| row[group_aliases.first] }
@@ -85,6 +89,10 @@ module ActiveRecord
             end
           end
         end
+
+      def relation
+        @relation_manager.relation
+      end
     end
   end
 end
