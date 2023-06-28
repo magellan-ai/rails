@@ -8,12 +8,11 @@ module ActiveRecord
       SINGLE_EMPTY_RESULT = 0
 
       def apply_join_dependency!
-        super.tap { |relation| RelationManager.prep_for_count! relation, @column_name }
+        super.tap { |relation| @relation_manager.prep_for_count! relation, @column_name }
       end
 
       def distinct?
         distinct = super
-
         @column_name ||= @relation_manager.select_for_count
         if @column_name == :all
           if !distinct

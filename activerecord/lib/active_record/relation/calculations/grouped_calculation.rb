@@ -16,8 +16,8 @@ module ActiveRecord
           group_fields = group_fields.uniq if group_fields.size > 1
 
           if group_fields.size == 1 && group_fields.first.respond_to?(:to_sym)
-            association  = relation.klass._reflect_on_association(group_fields.first)
-            associated   = association && association.belongs_to? # only count belongs_to associations
+            association = relation.klass._reflect_on_association(group_fields.first)
+            associated = association && association.belongs_to? # only count belongs_to associations
             group_fields = Array(association.foreign_key) if associated
           end
           group_fields = relation.arel_columns(group_fields)
@@ -31,12 +31,12 @@ module ActiveRecord
           group_columns = group_aliases.zip(group_fields)
 
           column = aggregate_column(column_name)
-          column_alias = column_alias_tracker.alias_for("#{operation} #{column_name.to_s.downcase}")
-          select_value = operation_over_aggregate_column(column, operation, relation.distinct)
+          column_alias = column_alias_tracker.alias_for("#{@operation} #{column_name.to_s.downcase}")
+          select_value = operation_over_aggregate_column(column, @operation, relation.distinct)
           select_value.as(relation.connection.quote_column_name(column_alias))
 
           select_values = [select_value]
-          select_values += self.select_values unless relation.having_clause.empty?
+          select_values += relation.select_values unless relation.having_clause.empty?
 
           select_values.concat group_columns.map { |aliaz, field|
             aliaz = relation.connection.quote_column_name(aliaz)
@@ -48,15 +48,15 @@ module ActiveRecord
           }
 
           curr_relation = relation.except(:group).distinct!(false)
-          curr_relation.group_values  = group_fields
+          curr_relation.group_values = group_fields
           curr_relation.select_values = select_values
 
-          result = curr_relation.send(:skip_query_cache_if_necessary) { @klass.connection.select_all(curr_relation.arel, "#{@klass.name} #{operation.capitalize}", async: @async) }
+          result = curr_relation.send(:skip_query_cache_if_necessary) { @klass.connection.select_all(curr_relation.arel, "#{@klass.name} #{@operation.capitalize}", async: @async) }
           # result = curr_relation.skip_query_cache_if_necessary { @klass.connection.select_all(curr_relation.arel, "#{@klass.name} #{operation.capitalize}", async: @async) }
           #
           result.then do |calculated_data|
             if association
-              key_ids     = calculated_data.collect { |row| row[group_aliases.first] }
+              key_ids = calculated_data.collect { |row| row[group_aliases.first] }
               key_records = association.klass.base_class.where(association.klass.base_class.primary_key => key_ids)
               key_records = key_records.index_by(&:id)
             end
@@ -74,9 +74,9 @@ module ActiveRecord
               end
             end
 
-            if operation != "count"
+            if @operation != :count
               type = column.try(:type_caster) ||
-                lookup_cast_type_from_join_dependencies(column_name.to_s) || Type.default_value
+                relation.send(:lookup_cast_type_from_join_dependencies, column_name.to_s) || Type.default_value
               type = type.subtype if Enum::EnumType === type
             end
 
@@ -85,14 +85,19 @@ module ActiveRecord
               key = key.first if key.size == 1
               key = key_records[key] if associated
 
-              result[key] = type_cast_calculated_value(row[column_alias], operation, type)
+              result[key] = type_cast_calculated_value(row[column_alias], @operation, type)
             end
           end
         end
 
-      def relation
-        @relation_manager.relation
-      end
+        def type_for(field, &block)
+          field_name = field.respond_to?(:name) ? field.name.to_s : field.to_s.split(".").last
+          @klass.type_for_attribute(field_name, &block)
+        end
+
+        def relation
+          @relation_manager.relation
+        end
     end
   end
 end

@@ -306,11 +306,6 @@ module ActiveRecord
         eager_loading? || (includes_values.present? && column_name && column_name != :all)
       end
 
-      def type_for(field, &block)
-        field_name = field.respond_to?(:name) ? field.name.to_s : field.to_s.split(".").last
-        @klass.type_for_attribute(field_name, &block)
-      end
-
       def lookup_cast_type_from_join_dependencies(name, join_dependencies = build_join_dependencies)
         each_join_dependencies(join_dependencies) do |join|
           type = join.base_klass.attribute_types.fetch(name, nil)

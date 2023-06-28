@@ -21,16 +21,16 @@ module ActiveRecord
       end
 
       def apply_join_dependency!
-        @relation = @relation.apply_join_dependency
+        @relation = @relation.send(:apply_join_dependency)
       end
 
-      def prep_for_count!(column_name)
-        unless @relation.distinct_value || distinct_select?(column_name || select_for_count)
-          @relation.distinct!
-          @relation.select_values = [ @relation.klass.primary_key || @relation.table[Arel.star] ]
+      def prep_for_count!(relation, column_name)
+        unless relation.distinct_value || distinct_select?(column_name || select_for_count)
+          relation.distinct!
+          relation.select_values = [ relation.klass.primary_key || relation.table[Arel.star] ]
         end
         # PostgreSQL: ORDER BY expressions must appear in SELECT list when using DISTINCT
-        @relation.order_values = [] if @relation.group_values.empty?
+        relation.order_values = [] if relation.group_values.empty?
       end
 
       def distinct?

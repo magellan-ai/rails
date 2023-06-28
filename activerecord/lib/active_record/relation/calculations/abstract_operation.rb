@@ -20,7 +20,7 @@ module ActiveRecord
 
       def query_builder
         @column = aggregate_column(@column_name)
-        query_builder = @relation_manager.relation_for_calc(select_value_for_calc).arel
+        @relation_manager.relation_for_calc(select_value_for_calc).arel
       end
 
       private

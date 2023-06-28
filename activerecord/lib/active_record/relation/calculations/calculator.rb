@@ -16,6 +16,7 @@ module ActiveRecord
     class Calculator # :nodoc:
       def initialize(relation, operation_name, column_name, none: false, async: false, klass: nil)
         @relation_manager = RelationManager.new(relation)
+        @column_name = column_name
 
         calculation_class = @relation_manager.grouped? ? GroupedCalculation : SimpleCalculation
 
