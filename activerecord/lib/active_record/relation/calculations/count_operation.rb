@@ -4,7 +4,7 @@ require_relative 'abstract_operation'
 
 module ActiveRecord
   module Calculations
-    class CountOperation  < AbstractOperation # :nodoc:
+    class CountOperation < AbstractOperation # :nodoc:
       SINGLE_EMPTY_RESULT = 0
 
       def apply_join_dependency!

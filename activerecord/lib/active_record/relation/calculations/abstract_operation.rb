@@ -3,11 +3,17 @@
 module ActiveRecord
   module Calculations
     class AbstractOperation # :nodoc:
+      attr_reader :column_name
+
       delegate :distinct?, to: :@relation_manager
 
       def initialize(relation_manager, column_name)
         @relation_manager = relation_manager
         @column_name = column_name
+        # hackathon this method shouldn't be called here
+        # but its functionalities are necessary in order to have the
+        # right column_name
+        distinct?
       end
 
       def apply_join_dependency!

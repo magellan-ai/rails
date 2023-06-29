@@ -29,8 +29,10 @@ module ActiveRecord
           return @operation.short_circuit_value if @operation.respond_to?(:short_circuit?) && @operation.short_circuit?
 
           relation = @relation_manager.relation
-
+          # hackathon operation is not a string
+          # hackathon TODO checking type/name is a sign of having a polymorphic behaviour
           if @operation == :count && ((column_name == :all && @distinct) || @relation_manager.has_limit_or_offset?)
+          # if @operation.class == ActiveRecord::Calculations::CountOperation && ((column_name == :all && @distinct) || @relation_manager.has_limit_or_offset?)
             # Shortcut when limit is zero.
             curr_relation = relation
             return 0 if relation.limit_value == 0
@@ -54,12 +56,15 @@ module ActiveRecord
           query_result = if curr_relation.where_clause.contradiction?
             ActiveRecord::Result.empty
                          else
+                           # hackathon operation is not a string
                            relation.send(:skip_query_cache_if_necessary) do
                              @klass.connection.select_all(query_builder, "#{@klass.name} #{@operation.capitalize}", async: @async)
                            end
                          end
 
           query_result.then do |result|
+            # hackathon operation is not a string
+            # hackathon TODO checking type/name is a sign of having a polymorphic behaviour
             if @operation != :count
               type = aggregate_column.try(:type_caster) || relation.send(:lookup_cast_type_from_join_dependencies, column_name.to_s) || Type.default_value
               type = type.subtype if Enum::EnumType === type

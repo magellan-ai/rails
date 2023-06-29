@@ -18,12 +18,11 @@ module ActiveRecord
         @relation_manager = RelationManager.new(relation)
         @column_name = column_name
 
-        calculation_class = @relation_manager.grouped? ? GroupedCalculation : SimpleCalculation
-
-        @calculation = calculation_class.new(@relation_manager, none: none, klass: klass, async: async, column_name:, operation: operation_name)
-
         operation_class = "#{self.class.module_parent_name}::#{operation_name.to_s.classify}Operation".constantize
         @operation = operation_class.new(@relation_manager, column_name)
+
+        calculation_class = @relation_manager.grouped? ? GroupedCalculation : SimpleCalculation
+        @calculation = calculation_class.new(@relation_manager, none: none, klass: klass, async: async, operation: @operation)
       end
 
       def perform
