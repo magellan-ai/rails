@@ -29,6 +29,18 @@ module ActiveRecord
         @relation_manager.relation_for_calc(select_value_for_calc).arel
       end
 
+      def name_in_query
+        self.class.to_s.match(/::(\w+)(?=Operation$)/)&.captures&.first.downcase
+      end
+
+      def over_aggregate_column(column)
+        raise NotImplementedError
+      end
+
+      def cast_result(value, type)
+        raise NotImplementedError
+      end
+
       private
 
       def select_value_for_calc

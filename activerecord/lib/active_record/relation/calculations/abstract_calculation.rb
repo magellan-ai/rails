@@ -14,32 +14,11 @@ module ActiveRecord
       end
 
       def type_cast_calculated_value(value, operation, type)
-        # hackathon Operation is not a string
-        # hackathon TODO checking type/name is a sign of having a polymorphic behaviour
-        case operation
-        when :count
-          value.to_i
-        when :sum
-          type.deserialize(value || 0)
-        when :average
-          case type.type
-          when :integer, :decimal
-            value&.to_d
-          else
-            type.deserialize(value)
-          end
-        else
-          # "minimum", "maximum"
-          type.deserialize(value)
-        end
+        operation.cast_result(value, type)
       end
 
       def operation_over_aggregate_column(column, operation)
-        distinct = @operation.distinct?
-        # hackathon Operation is not a string
-        # hackathon TODO checking type/name is a sign of having a polymorphic behaviour
-        operation == :count ? column.count(distinct) : column.public_send(operation)
-        # operation.class == ActiveRecord::Calculations::CountOperation ? column.count(distinct) : column.public_send(operation)
+        operation.over_aggregate_column(column)
       end
 
       def aggregate_column(column_name)

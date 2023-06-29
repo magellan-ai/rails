@@ -16,7 +16,7 @@ module ActiveRecord
           end
 
           subquery_alias = Arel.sql("subquery_for_count")
-          select_value = operation_over_aggregate_column(column_alias, :count, false)
+          select_value = operation_over_aggregate_column(column_alias, @operation)
 
           relation.build_subquery(subquery_alias, select_value)
         end
@@ -31,8 +31,7 @@ module ActiveRecord
           relation = @relation_manager.relation
           # hackathon operation is not a string
           # hackathon TODO checking type/name is a sign of having a polymorphic behaviour
-          if @operation == :count && ((column_name == :all && @distinct) || @relation_manager.has_limit_or_offset?)
-          # if @operation.class == ActiveRecord::Calculations::CountOperation && ((column_name == :all && @distinct) || @relation_manager.has_limit_or_offset?)
+          if @operation.name_in_query == "count" && ((column_name == :all && @distinct) || @relation_manager.has_limit_or_offset?)
             # Shortcut when limit is zero.
             curr_relation = relation
             return 0 if relation.limit_value == 0
@@ -44,7 +43,7 @@ module ActiveRecord
 
             aggregate_column = aggregate_column(column_name)
 
-            select_value = operation_over_aggregate_column(aggregate_column, @operation, @distinct)
+            select_value = operation_over_aggregate_column(aggregate_column, @operation)
 
             select_value.distinct = true if @operation == :sum && @distinct
 
@@ -56,16 +55,15 @@ module ActiveRecord
           query_result = if curr_relation.where_clause.contradiction?
             ActiveRecord::Result.empty
                          else
-                           # hackathon operation is not a string
                            relation.send(:skip_query_cache_if_necessary) do
-                             @klass.connection.select_all(query_builder, "#{@klass.name} #{@operation.capitalize}", async: @async)
+                             @klass.connection.select_all(query_builder, "#{@klass.name} #{@operation.name_in_query.capitalize}", async: @async)
                            end
                          end
 
           query_result.then do |result|
             # hackathon operation is not a string
             # hackathon TODO checking type/name is a sign of having a polymorphic behaviour
-            if @operation != :count
+            if @operation.name_in_query != "count"
               type = aggregate_column.try(:type_caster) || relation.send(:lookup_cast_type_from_join_dependencies, column_name.to_s) || Type.default_value
               type = type.subtype if Enum::EnumType === type
             end

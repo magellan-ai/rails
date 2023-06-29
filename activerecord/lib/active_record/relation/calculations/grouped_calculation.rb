@@ -32,7 +32,7 @@ module ActiveRecord
 
           column = aggregate_column(column_name)
           column_alias = column_alias_tracker.alias_for("#{@operation} #{column_name.to_s.downcase}")
-          select_value = operation_over_aggregate_column(column, @operation, relation.distinct)
+          select_value = operation_over_aggregate_column(column, @operation)
           select_value.as(relation.connection.quote_column_name(column_alias))
 
           select_values = [select_value]
@@ -51,7 +51,7 @@ module ActiveRecord
           curr_relation.group_values = group_fields
           curr_relation.select_values = select_values
 
-          result = curr_relation.send(:skip_query_cache_if_necessary) { @klass.connection.select_all(curr_relation.arel, "#{@klass.name} #{@operation.capitalize}", async: @async) }
+          result = curr_relation.send(:skip_query_cache_if_necessary) { @klass.connection.select_all(curr_relation.arel, "#{@klass.name} #{@operation.name_in_query.capitalize}", async: @async) }
           # result = curr_relation.skip_query_cache_if_necessary { @klass.connection.select_all(curr_relation.arel, "#{@klass.name} #{operation.capitalize}", async: @async) }
           #
           result.then do |calculated_data|
@@ -74,7 +74,9 @@ module ActiveRecord
               end
             end
 
-            if @operation != :count
+            # hackathon operation is not a string
+            # hackathon TODO checking type/name is a sign of having a polymorphic behaviour
+            if @operation.name_in_query != "count"
               type = column.try(:type_caster) ||
                 relation.send(:lookup_cast_type_from_join_dependencies, column_name.to_s) || Type.default_value
               type = type.subtype if Enum::EnumType === type

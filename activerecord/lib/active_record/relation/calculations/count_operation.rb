@@ -34,6 +34,15 @@ module ActiveRecord
       def short_circuit_value
         0
       end
+
+      def over_aggregate_column(column)
+        column.count(distinct?)
+      end
+
+      def cast_result(value, type)
+        value.to_i
+      end
+
     end
   end
 end
